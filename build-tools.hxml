@@ -1,0 +1,5 @@
+-cp tools
+-main tools.Main
+-neko run.n
+-D neko_v2
+-D windows

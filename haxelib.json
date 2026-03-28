@@ -1,0 +1,12 @@
+{
+  "name": "stackdeploy",
+  "url": "https://github.com/Falagard/HaxeStackPlatform",
+  "license": "MIT",
+  "tags": ["cli", "deployment", "tools"],
+  "description": "Deployment and management tools for the Haxe Stack Platform.",
+  "version": "0.1.0",
+  "classPath": "src",
+  "releasenote": "Initial version with server-stop command.",
+  "contributors": ["Falagard"],
+  "dependencies": {}
+}
