@@ -27,6 +27,8 @@ class Main {
         switch (command) {
             case "server-stop":
                 stopServer(args);
+            case "compile":
+                handleCompile(args);
             case "release":
                 handleRelease(args);
             case "build":
@@ -44,15 +46,243 @@ class Main {
     
     static function getTool():ReleaseTool {
         var apiKey = Sys.getEnv("STACK_PROJECT_KEY");
+        
+        // If not set as env var, try to read from .env file
+        if (apiKey == null || apiKey == "") {
+            apiKey = readFromEnvFile("STACK_PROJECT_KEY");
+        }
+        
         if (apiKey == null || apiKey == "") {
             Sys.println("Error: STACK_PROJECT_KEY environment variable not set.");
+            Sys.println("Set it or create a .env file with: STACK_PROJECT_KEY=spk_proj_...");
             Sys.exit(1);
         }
+        
         var apiUrl = Sys.getEnv("STACK_SERVER_URL");
+        if (apiUrl == null || apiUrl == "") {
+            apiUrl = readFromEnvFile("STACK_SERVER_URL");
+        }
         if (apiUrl == null || apiUrl == "") {
             apiUrl = "https://haxestack.com";
         }
         return new ReleaseTool(apiKey, apiUrl);
+    }
+
+    static function readFromEnvFile(key:String):String {
+        if (!FileSystem.exists(".env")) {
+            return null;
+        }
+        
+        try {
+            var content = File.getContent(".env");
+            var lines = content.split("\n");
+            for (line in lines) {
+                line = line.trim();
+                if (line.startsWith("#") || line == "") continue;
+                
+                if (line.indexOf("=") > 0) {
+                    var eqIndex = line.indexOf("=");
+                    var varName = line.substring(0, eqIndex).trim();
+                    var varValue = line.substring(eqIndex + 1).trim();
+                    
+                    // Remove quotes if present
+                    if (varValue.length >= 2) {
+                        var first = varValue.charAt(0);
+                        var last = varValue.charAt(varValue.length - 1);
+                        if ((first == '"' && last == '"') || (first == "'" && last == "'")) {
+                            varValue = varValue.substring(1, varValue.length - 1);
+                        }
+                    }
+                    
+                    if (varName == key) {
+                        return varValue;
+                    }
+                }
+            }
+        } catch (e:Dynamic) {
+            return null;
+        }
+        
+        return null;
+    }
+
+    static function handleCompile(args:Array<String>) {
+        var version = getArg(args, "--version");
+        var platform = getArg(args, "--platform");
+        var outputDir = getArg(args, "--output");
+        
+        // Default version to 0.0.0 if not specified
+        if (version == null) {
+            version = "0.0.0";
+        }
+        
+        // Map platform names to lime targets
+        var limePlatform:String = null;
+        if (platform == null || platform == "windows") {
+            limePlatform = "windows";
+        } else if (platform == "linux") {
+            limePlatform = "linux";
+        } else if (platform == "macos") {
+            limePlatform = "mac";
+        } else {
+            Sys.println("Error: Unknown platform: " + platform);
+            Sys.exit(1);
+        }
+        
+        if (outputDir == null) {
+            outputDir = "builds";
+        }
+        
+        // Ensure output directory exists
+        if (!FileSystem.exists(outputDir)) {
+            FileSystem.createDirectory(outputDir);
+        }
+        
+        var cwd = Sys.getCwd();
+        Sys.println('[Compile] Building for $limePlatform (v$version)...');
+        
+        // Step 1: Build client HTML and copy to server static directory
+        Sys.println("\n[Step 1/3] Building client HTML...");
+        Sys.setCwd(cwd + "/Client");
+        var clientHtmlExit = Sys.command("haxelib", ["run", "lime", "build", "html5", "-release"]);
+        if (clientHtmlExit != 0) {
+            Sys.println("Error: Client HTML build failed");
+            Sys.exit(clientHtmlExit);
+        }
+        Sys.println("✅ Client HTML built");
+        
+        // Copy HTML to server static directory
+        Sys.println("   Copying to server static directory...");
+        var htmlSourceDir = cwd + "/Client/Export/html5/bin";
+        var htmlDestDir = cwd + "/Server/static/client";
+        copyDirectory(htmlSourceDir, htmlDestDir);
+        Sys.println("✅ Copied to " + htmlDestDir);
+        
+        // Step 2: Build server using HashLink
+        Sys.println("\n[Step 2/3] Building server (HashLink)...");
+        Sys.setCwd(cwd + "/Server");
+        var serverExit = Sys.command("haxelib", ["run", "lime", "build", "hashlink", "-release"]);
+        if (serverExit != 0) {
+            Sys.println("Error: Server build failed");
+            Sys.exit(serverExit);
+        }
+        Sys.println("✅ Server built");
+        
+        // Step 3: Build client using HashLink
+        Sys.println("\n[Step 3/3] Building client (HashLink)...");
+        Sys.setCwd(cwd + "/Client");
+        var clientHlExit = Sys.command("haxelib", ["run", "lime", "build", "hashlink", "-release"]);
+        if (clientHlExit != 0) {
+            Sys.println("Error: Client HashLink build failed");
+            Sys.exit(clientHlExit);
+        }
+        Sys.println("✅ Client built");
+        
+        Sys.setCwd(cwd);
+        
+        // Zip server
+        Sys.println("\n[Package] Creating server zip...");
+        var serverZip = '$outputDir/server-${limePlatform}-x64-$version.zip';
+        zipDirectory("Server/Export/hl/bin", serverZip);
+        Sys.println("✅ Server zip created: " + serverZip);
+        
+        // Zip client
+        Sys.println("[Package] Creating client zip...");
+        var clientZip = '$outputDir/client-${limePlatform}-x64-$version.zip';
+        zipDirectory("Client/Export/hl/bin", clientZip);
+        Sys.println("✅ Client zip created: " + clientZip);
+        
+        // Output result
+        Sys.println("");
+        Sys.println("✅ Build complete!");
+        Sys.println("Ready for release:");
+        Sys.println('  • $serverZip');
+        Sys.println('  • $clientZip');
+        Sys.println("");
+        Sys.println("Next step:");
+        Sys.println('  haxelib run stackdeploy release create --version $version');
+    }
+
+    static function zipDirectory(sourceDir:String, destZip:String) {
+        if (!FileSystem.exists(sourceDir)) {
+            throw 'Source directory not found: $sourceDir';
+        }
+        
+        // Remove old zip if exists
+        if (FileSystem.exists(destZip)) {
+            FileSystem.deleteFile(destZip);
+        }
+        
+        // Convert to absolute paths for PowerShell
+        var absSourceDir = FileSystem.fullPath(sourceDir);
+        var absDestZip = FileSystem.fullPath(destZip);
+        
+        // Use system zip command - platform agnostic approach
+        var exitCode = if (Sys.systemName() == "Windows") {
+            // PowerShell: Compress-Archive - simpler approach without Get-ChildItem
+            Sys.command("powershell", [
+                "-NoProfile",
+                "-Command",
+                'Compress-Archive -Path "${absSourceDir}" -DestinationPath "${absDestZip}" -Force'
+            ]);
+        } else {
+            // Unix: zip
+            var proc = new sys.io.Process("bash", ["-c", 'cd "$sourceDir" && zip -r "../${absDestZip}" .'  ]);
+            var exitCode = proc.exitCode();
+            proc.close();
+            exitCode;
+        };
+        
+        if (exitCode != 0) {
+            throw 'Failed to create zip: $destZip';
+        }
+    }
+
+    static function deleteRecursive(path:String) {
+        if (!FileSystem.exists(path)) {
+            return;
+        }
+        if (FileSystem.isDirectory(path)) {
+            for (file in FileSystem.readDirectory(path)) {
+                deleteRecursive(path + "/" + file);
+            }
+            FileSystem.deleteDirectory(path);
+        } else {
+            FileSystem.deleteFile(path);
+        }
+    }
+
+    static function copyDirectory(src:String, dest:String) {
+        if (!FileSystem.exists(src)) {
+            throw 'Source directory not found: $src';
+        }
+        
+        // Create destination if it doesn't exist
+        if (FileSystem.exists(dest)) {
+            deleteRecursive(dest);
+        }
+        FileSystem.createDirectory(dest);
+        
+        // Copy all files recursively
+        function copyRecursive(srcPath:String, destPath:String) {
+            if (FileSystem.isDirectory(srcPath)) {
+                for (file in FileSystem.readDirectory(srcPath)) {
+                    var srcFile = srcPath + "/" + file;
+                    var destFile = destPath + "/" + file;
+                    copyRecursive(srcFile, destFile);
+                }
+            } else {
+                if (!FileSystem.exists(destPath)) {
+                    var destDir = haxe.io.Path.directory(destPath);
+                    if (!FileSystem.exists(destDir)) {
+                        FileSystem.createDirectory(destDir);
+                    }
+                }
+                File.copy(srcPath, destPath);
+            }
+        }
+        
+        copyRecursive(src, dest);
     }
 
     static function handleRelease(args:Array<String>) {
@@ -253,6 +483,8 @@ class Main {
         Sys.println("Usage: haxelib run stackdeploy <command> [options]");
         Sys.println("");
         Sys.println("Available commands:");
+        Sys.println("  compile              Build server and client, create zips for release.");
+        Sys.println("                       Options: [--version <v>] (defaults to 0.0.0), [--platform <p>], [--output <dir>]");
         Sys.println("  release create       Create a new release.");
         Sys.println("                       Options: --version <v>, --description <d>, --git-sha <s>");
         Sys.println("  release finalize     Mark a release as ready for deployment.");
@@ -266,6 +498,7 @@ class Main {
         Sys.println("  help                 Display this help message.");
         Sys.println("");
         Sys.println("Examples:");
+        Sys.println("  haxelib run stackdeploy compile --version 1.0.0");
         Sys.println("  haxelib run stackdeploy push");
         Sys.println("  haxelib run stackdeploy release create --version 1.0.0");
     }
