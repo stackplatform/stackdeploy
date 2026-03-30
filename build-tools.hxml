@@ -1,4 +1,4 @@
--cp tools
+-cp .
 -main tools.Main
 -neko run.n
 -D neko_v2
