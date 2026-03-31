@@ -10,9 +10,9 @@ import sys.net.Host;
 using StringTools;
 
 class ReleaseTool {
-    var apiKey:String;
-    var apiUrl:String;
-    var projectId:String = "self";
+    public var apiKey:String;
+    public var apiUrl:String;
+    public var projectId:String = "self";
 
     public function new(apiKey:String, apiUrl:String = "https://haxestack.com") {
         this.apiKey = apiKey;
@@ -34,6 +34,13 @@ class ReleaseTool {
         var res = post(url, body);
         if (res.id == null) throw "Failed to create release: " + Json.stringify(res);
         return res.id;
+    }
+
+    public function deployReleaseByVersion(version:String, ?tag:String):Array<Dynamic> {
+        var url = '${apiUrl}/v1/projects/${projectId}/releases/${version}/deploy' + (tag != null ? '?tag=$tag' : '');
+        var res = post(url, {});
+        if (!Std.isOfType(res, Array)) throw "Failed to trigger deployment: " + Json.stringify(res);
+        return cast res;
     }
 
     public function addBuild(releaseId:String, platform:String, arch:String, ?githubRunId:String):String {
@@ -216,7 +223,7 @@ class ReleaseTool {
         return request("PUT", url, body);
     }
 
-    private function request(method:String, url:String, body:Dynamic):Dynamic {
+    public function request(method:String, url:String, body:Dynamic):Dynamic {
         var http = new Http(url);
         var responseData:String = null;
         var statusCode:Int = 0;

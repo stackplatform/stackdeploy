@@ -35,6 +35,8 @@ class Main {
                 handleBuild(args);
             case "push":
                 handlePush(args);
+            case "deploy":
+                handleDeploy(args);
             case "help":
                 printHelp();
             default:
@@ -355,6 +357,72 @@ class Main {
                 Sys.println("Unknown build command: " + subCommand);
                 Sys.exit(1);
         }
+    }
+
+    static function handleDeploy(args:Array<String>) {
+        var version = getArg(args, "--version");
+        var tag = getArg(args, "--env");
+        if (tag == null) tag = getArg(args, "--tag");
+
+        if (version == null) {
+            Sys.println("Error: --version <v> is required.");
+            Sys.exit(1);
+        }
+
+        var tool = getTool();
+        Sys.println('Triggering deployment of version $version' + (tag != null ? ' to $tag matches...' : ' to all instances...'));
+        
+        var jobs:Array<Dynamic> = tool.deployReleaseByVersion(version, tag);
+        if (jobs.length == 0) {
+            Sys.println("No matching instances found for deployment.");
+            return;
+        }
+
+        Sys.println('Created ${jobs.length} deployment jobs. Monitoring progress...');
+        
+        // Monitoring loop
+        var completed = new Map<String, Bool>();
+        var total = jobs.length;
+        var finishedCount = 0;
+
+        while (finishedCount < total) {
+            Sys.sleep(2);
+            finishedCount = 0;
+            
+            for (job in jobs) {
+                var jobId:String = job.id;
+                if (completed.exists(jobId)) {
+                    finishedCount++;
+                    continue;
+                }
+
+                // Poll for status
+                // We need an endpoint for job status by ID
+                try {
+                    var statusUrl = '${tool.apiUrl}/v1/projects/${tool.projectId}/deployments/${job.instanceId}/jobs/$jobId';
+                    var status:Dynamic = tool.request("GET", statusUrl, null);
+                    
+                    var currentStatus:String = status.status;
+                    var progress:Float = status.progress;
+                    
+                    if (currentStatus == "succeeded" || currentStatus == "completed") {
+                        Sys.println('  [Node ${job.instanceId}] SUCCESS: $currentStatus');
+                        completed.set(jobId, true);
+                        finishedCount++;
+                    } else if (currentStatus == "failed") {
+                        Sys.println('  [Node ${job.instanceId}] FAILED: ${status.errorMessage}');
+                        completed.set(jobId, true);
+                        finishedCount++;
+                    } else {
+                        Sys.println('  [Node ${job.instanceId}] $currentStatus (${progress}%)');
+                    }
+                } catch(e:Dynamic) {
+                    // Silently retry
+                }
+            }
+        }
+
+        Sys.println("Deployment finished.");
     }
 
     static function handlePush(args:Array<String>) {
