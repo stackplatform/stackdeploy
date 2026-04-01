@@ -149,7 +149,20 @@ class Main {
         var platform = getArg(args, "--platform");
         var outputDir = getArg(args, "--output");
         
-        // Default version to 0.0.0 if not specified
+        // If version not provided by CLI, try to read from stackdeploy.json
+        if (version == null) {
+            var configFile = "stackdeploy.json";
+            if (FileSystem.exists(configFile)) {
+                try {
+                    var config:Dynamic = Json.parse(File.getContent(configFile));
+                    if (config.version != null && config.version != "auto") {
+                        version = config.version;
+                    }
+                } catch (e:Dynamic) {}
+            }
+        }
+        
+        // Default version to 0.0.0 if not specified anywhere
         if (version == null) {
             version = "0.0.0";
         }
