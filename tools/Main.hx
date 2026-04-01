@@ -201,14 +201,14 @@ class Main {
             Sys.println("Error: Client HTML build failed");
             Sys.exit(clientHtmlExit);
         }
-        Sys.println("✅ Client HTML built");
+        Sys.println("[OK] Client HTML built");
         
         // Copy HTML to server static directory
         Sys.println("   Copying to server static directory...");
         var htmlSourceDir = cwd + "/Client/Export/html5/bin";
         var htmlDestDir = cwd + "/Server/static/client";
         copyDirectory(htmlSourceDir, htmlDestDir);
-        Sys.println("✅ Copied to " + htmlDestDir);
+        Sys.println("[OK] Copied to " + htmlDestDir);
         
         // Step 2: Build server using HashLink
         Sys.println("\n[Step 2/3] Building server (HashLink)...");
@@ -218,7 +218,7 @@ class Main {
             Sys.println("Error: Server build failed");
             Sys.exit(serverExit);
         }
-        Sys.println("✅ Server built");
+        Sys.println("[OK] Server built");
         
         // Step 3: Build client using HashLink
         Sys.println("\n[Step 3/3] Building client (HashLink)...");
@@ -228,7 +228,7 @@ class Main {
             Sys.println("Error: Client HashLink build failed");
             Sys.exit(clientHlExit);
         }
-        Sys.println("✅ Client built");
+        Sys.println("[OK] Client built");
         
         Sys.setCwd(cwd);
         
@@ -236,20 +236,20 @@ class Main {
         Sys.println("\n[Package] Creating server zip...");
         var serverZip = '$outputDir/server-${limePlatform}-x64-$version-b$buildNumber.zip';
         zipDirectory("Server/Export/hl/bin", serverZip);
-        Sys.println("✅ Server zip created: " + serverZip);
+        Sys.println("[OK] Server zip created: " + serverZip);
         
         // Zip client
         Sys.println("[Package] Creating client zip...");
         var clientZip = '$outputDir/client-${limePlatform}-x64-$version-b$buildNumber.zip';
         zipDirectory("Client/Export/hl/bin", clientZip);
-        Sys.println("✅ Client zip created: " + clientZip);
+        Sys.println("[OK] Client zip created: " + clientZip);
         
         // Output result
         Sys.println("");
-        Sys.println("✅ Build complete!");
+        Sys.println("[OK] Build complete!");
         Sys.println("Ready for release:");
-        Sys.println('  • $serverZip');
-        Sys.println('  • $clientZip');
+        Sys.println('  * $serverZip');
+        Sys.println('  * $clientZip');
         Sys.println("");
         Sys.println("Next step:");
         Sys.println('  haxelib run stackdeploy release create --version $version');
