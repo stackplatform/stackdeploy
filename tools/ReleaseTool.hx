@@ -43,11 +43,12 @@ class ReleaseTool {
         return cast res;
     }
 
-    public function addBuild(releaseId:String, platform:String, arch:String, ?githubRunId:String):String {
+    public function addBuild(releaseId:String, platform:String, arch:String, ?name:String, ?githubRunId:String):String {
         var url = '${apiUrl}/v1/projects/${projectId}/releases/${releaseId}/builds';
         var body = {
             platform: platform,
             architecture: arch,
+            name: name,
             githubRunId: githubRunId
         };
 

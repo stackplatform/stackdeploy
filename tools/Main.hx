@@ -399,7 +399,7 @@ class Main {
                 }
                 
                 var tool = getTool();
-                var buildId = tool.addBuild(releaseId, platform, arch);
+                var buildId = tool.addBuild(releaseId, platform, arch, name);
                 tool.uploadArtifact(buildId, file);
                 Sys.println("Build uploaded successfully: " + buildId);
                 
@@ -556,7 +556,7 @@ class Main {
                 if (build.artifact != null) {
                     Sys.println('Uploading artifact: ${build.artifact}');
                     try {
-                        var buildId = tool.addBuild(releaseId, build.platform, build.arch);
+                        var buildId = tool.addBuild(releaseId, build.platform, build.arch, build.name);
                         tool.uploadArtifact(buildId, build.artifact);
                     } catch (e:Dynamic) {
                         Sys.println('Error uploading artifact ${build.artifact}: $e');
