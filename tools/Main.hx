@@ -108,6 +108,42 @@ class Main {
         return null;
     }
 
+    static function getBuildNumber(?args:Array<String>):Int {
+        // Explicit arg override
+        if (args != null) {
+            var buildArg = getArg(args, "--build");
+            if (buildArg != null) return Std.parseInt(buildArg);
+        }
+
+        // CI check: GitHub Actions
+        var ghRun = Sys.getEnv("GITHUB_RUN_NUMBER");
+        if (ghRun != null && ghRun != "") {
+            return Std.parseInt(ghRun);
+        }
+        
+        if (!FileSystem.exists("build_number")) {
+            return 0;
+        }
+        try {
+            return Std.parseInt(File.getContent("build_number").trim());
+        } catch (e:Dynamic) {
+            return 0;
+        }
+    }
+
+    static function incrementBuildNumber(?args:Array<String>):Int {
+        // Check if GitHub Actions is active - we don't increment local file there
+        var ghRun = Sys.getEnv("GITHUB_RUN_NUMBER");
+        if ((ghRun != null && ghRun != "") || (args != null && getArg(args, "--build") != null)) {
+            return getBuildNumber(args);
+        }
+
+        var current = getBuildNumber();
+        var next = current + 1;
+        File.saveContent("build_number", Std.string(next));
+        return next;
+    }
+
     static function handleCompile(args:Array<String>) {
         var version = getArg(args, "--version");
         var platform = getArg(args, "--platform");
@@ -141,7 +177,8 @@ class Main {
         }
         
         var cwd = Sys.getCwd();
-        Sys.println('[Compile] Building for $limePlatform (v$version)...');
+        var buildNumber = incrementBuildNumber(args);
+        Sys.println('[Compile] Building for $limePlatform (v$version, build $buildNumber)...');
         
         // Step 1: Build client HTML and copy to server static directory
         Sys.println("\n[Step 1/3] Building client HTML...");
@@ -184,13 +221,13 @@ class Main {
         
         // Zip server
         Sys.println("\n[Package] Creating server zip...");
-        var serverZip = '$outputDir/server-${limePlatform}-x64-$version.zip';
+        var serverZip = '$outputDir/server-${limePlatform}-x64-$version-b$buildNumber.zip';
         zipDirectory("Server/Export/hl/bin", serverZip);
         Sys.println("✅ Server zip created: " + serverZip);
         
         // Zip client
         Sys.println("[Package] Creating client zip...");
-        var clientZip = '$outputDir/client-${limePlatform}-x64-$version.zip';
+        var clientZip = '$outputDir/client-${limePlatform}-x64-$version-b$buildNumber.zip';
         zipDirectory("Client/Export/hl/bin", clientZip);
         Sys.println("✅ Client zip created: " + clientZip);
         
@@ -427,13 +464,11 @@ class Main {
 
     static function handlePush(args:Array<String>) {
         var configFile = getArg(args, "--config") != null ? getArg(args, "--config") : "stackdeploy.json";
-        if (!FileSystem.exists(configFile)) {
-            Sys.println("Error: Config file not found: " + configFile);
-            Sys.exit(1);
+        var config:Dynamic = {};
+        if (FileSystem.exists(configFile)) {
+            var content = File.getContent(configFile);
+            config = Json.parse(content);
         }
-        
-        var content = File.getContent(configFile);
-        var config:Dynamic = Json.parse(content);
         
         var version = config.version;
         if (version == "auto" || version == null) {
@@ -441,13 +476,58 @@ class Main {
         }
         
         var gitSha = runGitCommand("rev-parse HEAD");
+        var buildNumber = getBuildNumber(args);
         
-        Sys.println('Creating release $version ($gitSha)...');
+        Sys.println('Creating release $version ($gitSha) - Build $buildNumber...');
         var tool = getTool();
         var releaseId = tool.createRelease(version, gitSha, null, config.description);
         
         var builds:Array<Dynamic> = config.builds;
-        if (builds != null) {
+        if (builds == null) {
+            builds = [];
+        }
+        
+        // Auto-detect artifacts if builds is empty or we want to supplement it
+        var outputDir = "builds"; // Default
+        if (FileSystem.exists(outputDir) && FileSystem.isDirectory(outputDir)) {
+            var files = FileSystem.readDirectory(outputDir);
+            for (file in files) {
+                // Look for zips that match our version and build number
+                // Pattern: server-platform-arch-version-bBuildNum.zip
+                if (file.endsWith(".zip") && file.indexOf("-b" + buildNumber + ".zip") != -1) {
+                    var parts = file.split("-");
+                    if (parts.length >= 4) {
+                        var name = parts[0];
+                        var platform = parts[1];
+                        var arch = parts[2];
+                        // version and build number are in the rest
+                        
+                        var artifactPath = outputDir + "/" + file;
+                        
+                        // Check if this artifact is already in the explicit builds list
+                        var alreadyExists = false;
+                        for (b in builds) {
+                            if (b.artifact == artifactPath) {
+                                alreadyExists = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!alreadyExists) {
+                            Sys.println('Auto-detected artifact: $file');
+                            builds.push({
+                                name: name,
+                                platform: platform,
+                                arch: arch,
+                                artifact: artifactPath
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if (builds.length > 0) {
             for (build in builds) {
                 Sys.println('Target: ${build.name} (${build.platform}/${build.arch})');
                 
@@ -462,10 +542,17 @@ class Main {
                 
                 if (build.artifact != null) {
                     Sys.println('Uploading artifact: ${build.artifact}');
-                    var buildId = tool.addBuild(releaseId, build.platform, build.arch);
-                    tool.uploadArtifact(buildId, build.artifact);
+                    try {
+                        var buildId = tool.addBuild(releaseId, build.platform, build.arch);
+                        tool.uploadArtifact(buildId, build.artifact);
+                    } catch (e:Dynamic) {
+                        Sys.println('Error uploading artifact ${build.artifact}: $e');
+                        Sys.exit(1);
+                    }
                 }
             }
+        } else {
+            Sys.println("No builds or artifacts found to push.");
         }
         
         Sys.println("Finalizing release...");
@@ -547,12 +634,13 @@ class Main {
     }
     
     static function printHelp() {
-        Sys.println("stackdeploy CLI v0.2.0");
+        Sys.println("stackdeploy CLI v0.3.0");
         Sys.println("Usage: haxelib run stackdeploy <command> [options]");
         Sys.println("");
         Sys.println("Available commands:");
         Sys.println("  compile              Build server and client, create zips for release.");
-        Sys.println("                       Options: [--version <v>] (defaults to 0.0.0), [--platform <p>], [--output <dir>]");
+        Sys.println("                       Increments build number automatically.");
+        Sys.println("                       Options: [--version <v>] (defaults to 0.0.0), [--platform <p>], [--output <dir>], [--build <n>]");
         Sys.println("  release create       Create a new release.");
         Sys.println("                       Options: --version <v>, --description <d>, --git-sha <s>");
         Sys.println("  release finalize     Mark a release as ready for deployment.");
@@ -560,7 +648,8 @@ class Main {
         Sys.println("  build upload         Register and upload a build artifact.");
         Sys.println("                       Options: --release <id>, --platform <p>, --arch <a>, --file <f>");
         Sys.println("  push                 Run builds and upload everything from stackdeploy.json.");
-        Sys.println("                       Options: --config <path>");
+        Sys.println("                       Note: Automatically detects zips in builds/ folder.");
+        Sys.println("                       Options: --config <path>, --build <n>");
         Sys.println("  server-stop [name]   Terminate server processes. Defaults to StackServer.exe.");
         Sys.println("                       Options: --name, -n <name>");
         Sys.println("  help                 Display this help message.");
