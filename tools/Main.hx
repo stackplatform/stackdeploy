@@ -12,9 +12,9 @@ class Main {
         var args = Sys.args();
         
         // When running via haxelib, the last argument is the CWD
-        var cwd = args.pop();
-        if (cwd != null && FileSystem.exists(cwd) && FileSystem.isDirectory(cwd)) {
-            Sys.setCwd(cwd);
+        var last = args.length > 0 ? args[args.length - 1] : null;
+        if (last != null && FileSystem.exists(last) && FileSystem.isDirectory(last)) {
+            Sys.setCwd(args.pop());
         }
         
         if (args.length == 0) {
