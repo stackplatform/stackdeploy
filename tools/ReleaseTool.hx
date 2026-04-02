@@ -13,11 +13,12 @@ class ReleaseTool {
     public var apiKey:String;
     public var apiUrl:String;
     public var projectId:String = "self";
+    private var nodeCache:Map<String, String> = new Map<String, String>();
 
     public function new(apiKey:String, apiUrl:String = "https://haxestack.com") {
         this.apiKey = apiKey;
         this.apiUrl = apiUrl;
-        if (this.apiUrl.endsWith("/")) {
+        if (StringTools.endsWith(this.apiUrl, "/")) {
             this.apiUrl = this.apiUrl.substr(0, this.apiUrl.length - 1);
         }
     }
@@ -40,6 +41,28 @@ class ReleaseTool {
         var url = '${apiUrl}/v1/projects/${projectId}/releases/${version}/deploy' + (tag != null ? '?tag=$tag' : '');
         var res = post(url, {});
         if (!Std.isOfType(res, Array)) throw "Failed to trigger deployment: " + Json.stringify(res);
+        return cast res;
+    }
+
+    public function listReleases():Array<Dynamic> {
+        var url = '${apiUrl}/v1/projects/${projectId}/releases';
+        var res = get(url);
+        if (!Std.isOfType(res, Array)) return [];
+        return cast res;
+    }
+
+    public function getReleaseByVersion(version:String):Dynamic {
+        var releases = listReleases();
+        for (r in releases) {
+            if (r.version == version) return r;
+        }
+        return null;
+    }
+
+    public function listBuilds(releaseId:String):Array<Dynamic> {
+        var url = '${apiUrl}/v1/projects/${projectId}/releases/${releaseId}/builds';
+        var res = get(url);
+        if (!Std.isOfType(res, Array)) return [];
         return cast res;
     }
 
@@ -216,12 +239,27 @@ class ReleaseTool {
         post(url, {});
     }
 
+    private function get(url:String):Dynamic {
+        return request("GET", url, null);
+    }
+
     private function post(url:String, body:Dynamic):Dynamic {
         return request("POST", url, body);
     }
 
     private function put(url:String, body:Dynamic):Dynamic {
         return request("PUT", url, body);
+    }
+
+    public function discoverProject(projectId:String):Void {
+        var url = '${apiUrl}/v1/projects/${projectId}/location';
+        try {
+            var res = request("GET", url, null);
+            if (res != null && res.apiBaseUrl != null) {
+                nodeCache.set(projectId, res.apiBaseUrl);
+                Sys.println('[ReleaseTool] Discovered project $projectId at ${res.apiBaseUrl}');
+            }
+        } catch(e:Dynamic) {} // Silent fallback
     }
 
     public function request(method:String, url:String, body:Dynamic):Dynamic {
@@ -253,6 +291,28 @@ class ReleaseTool {
             http.customRequest(true, new haxe.io.BytesOutput(), null, "PUT");
         } else {
             http.request(method == "POST");
+        }
+
+        // Handle 307 Redirect (Discovery)
+        if (statusCode == 307) {
+            var location:String = null;
+            // Native Http might not expose headers easily on all platforms, 
+            // but for sys/hl targets it usually works or we can check via custom headers.
+            // In a real sdk we would use a more robust HTTP library.
+            try {
+                // Haxe Http sys target populates responseHeaders
+                var headers:Map<String, String> = (cast http).responseHeaders;
+                if (headers != null) {
+                    location = headers.get("Location");
+                    if (location == null) location = headers.get("location");
+                }
+            } catch(e:Dynamic) {}
+
+            if (location != null) {
+                Sys.println('[ReleaseTool] Transparent redirection to shard: $location');
+                // Potential loop check should be here in prod
+                return request(method, location, body);
+            }
         }
 
         // Check for HTTP errors (4xx, 5xx)

@@ -372,6 +372,19 @@ class Main {
                 tool.finalizeRelease(releaseId);
                 Sys.println("Release finalized successfully.");
                 
+            case "list":
+                var tool = getTool();
+                var releases = tool.listReleases();
+                Sys.println(StringTools.rpad("ID", " ", 30) + " | " + StringTools.rpad("Version", " ", 15) + " | " + StringTools.rpad("Status", " ", 10) + " | " + "Created");
+                Sys.println("----------------------------------------------------------------------");
+                for (r in releases) {
+                    var line = StringTools.rpad(r.id, " ", 30) + " | " + 
+                               StringTools.rpad(r.version, " ", 15) + " | " + 
+                               StringTools.rpad(r.status, " ", 10) + " | " + 
+                               Date.fromTime(r.createdAt).toString();
+                    Sys.println(line);
+                }
+                
             default:
                 Sys.println("Unknown release command: " + subCommand);
                 Sys.exit(1);
@@ -402,6 +415,33 @@ class Main {
                 var buildId = tool.addBuild(releaseId, platform, arch, name);
                 tool.uploadArtifact(buildId, file);
                 Sys.println("Build uploaded successfully: " + buildId);
+            
+            case "list":
+                var version = getArg(args, "--version");
+                var releaseId = getArg(args, "--release");
+                var tool = getTool();
+                
+                if (releaseId == null && version != null) {
+                    var r = tool.getReleaseByVersion(version);
+                    if (r != null) releaseId = r.id;
+                }
+                
+                if (releaseId == null) {
+                    Sys.println("Error: Must provide --release <id> or --version <v>");
+                    Sys.exit(1);
+                }
+                
+                var builds = tool.listBuilds(releaseId);
+                Sys.println(StringTools.rpad("Name", " ", 20) + " | " + StringTools.rpad("Platform", " ", 15) + " | " + StringTools.rpad("Status", " ", 10) + " | " + "Artifact");
+                Sys.println("---------------------------------------------------------------------------");
+                for (b in builds) {
+                    var platStr = b.platform + "/" + b.architecture;
+                    var line = StringTools.rpad(b.name, " ", 20) + " | " + 
+                               StringTools.rpad(platStr, " ", 15) + " | " + 
+                               StringTools.rpad(b.status, " ", 10) + " | " + 
+                               (b.binaryUrl != null ? b.binaryUrl : "N/A");
+                    Sys.println(line);
+                }
                 
             default:
                 Sys.println("Unknown build command: " + subCommand);
