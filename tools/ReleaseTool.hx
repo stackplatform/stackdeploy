@@ -239,6 +239,18 @@ class ReleaseTool {
         post(url, {});
     }
 
+    public function getDevConfig(environmentId:String):Dynamic {
+        var url = '${apiUrl}/v1/projects/${projectId}/environments/${environmentId}/dev-config';
+        return get(url);
+    }
+
+    public function listEnvironments():Array<Dynamic> {
+        var url = '${apiUrl}/v1/projects/${projectId}/environments';
+        var res = get(url);
+        if (!Std.isOfType(res, Array)) return [];
+        return cast res;
+    }
+
     private function get(url:String):Dynamic {
         return request("GET", url, null);
     }
