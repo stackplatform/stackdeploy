@@ -7,6 +7,17 @@ import haxe.Json;
 import Sys;
 using StringTools;
 
+import app.services.environment.DevEnvironmentCheckService;
+import app.services.environment.EnvironmentModels;
+import app.services.environment.EnvironmentModels.EnvironmentCheck;
+import app.services.environment.EnvironmentModels.EnvironmentCheckStatus;
+import app.services.environment.EnvironmentConfig;
+import app.services.environment.EnvFileService;
+import app.services.environment.HmmInstallService;
+import app.services.environment.ProjectTemplateCloneService;
+import app.services.environment.ProjectOnboardingService;
+import app.models.BootstrapModels.BootstrapStepResult;
+
 class Main {
     public static function main() {
         var args = Sys.args();
@@ -39,6 +50,28 @@ class Main {
                 handleDeploy(args);
             case "refresh-env":
                 handleRefreshEnv(args);
+            case "doctor":
+                handleDoctor(args);
+            case "init":
+                handleInit(args);
+            case "hmm":
+                var subCommand = args.length > 1 ? args[1] : null;
+                if (subCommand == "install") {
+                    handleHmmInstall(args);
+                } else {
+                    Sys.println("Unknown hmm command: " + subCommand);
+                    printHelp();
+                    Sys.exit(1);
+                }
+            case "env":
+                var subCommand = args.length > 1 ? args[1] : null;
+                if (subCommand == "set-project") {
+                    handleEnvSetProject(args);
+                } else {
+                    Sys.println("Unknown env command: " + subCommand);
+                    printHelp();
+                    Sys.exit(1);
+                }
             case "help":
                 printHelp();
             default:
@@ -736,6 +769,342 @@ class Main {
         }
     }
 
+    static function getEnvironmentProvider():app.services.environment.IEnvironmentProvider {
+        var sysName = Sys.systemName();
+        if (sysName == "Windows") {
+            return new app.services.environment.WindowsEnvironmentProvider();
+        } else {
+            return new app.services.environment.MacEnvironmentProvider();
+        }
+    }
+
+    static function hasArg(args:Array<String>, name:String):Bool {
+        for (arg in args) {
+            if (arg == name) return true;
+        }
+        return false;
+    }
+
+    static function checkToJson(check:EnvironmentCheck):Dynamic {
+        return {
+            id: check.id,
+            name: check.name,
+            category: check.category,
+            status: Std.string(check.status),
+            detectedVersion: check.detectedVersion,
+            detectedPath: check.detectedPath,
+            message: check.message,
+            details: check.details,
+            fixActions: check.fixActions != null ? [for (a in check.fixActions) {
+                id: a.id,
+                label: a.label,
+                description: a.description,
+                command: a.command,
+                opensUrl: a.opensUrl
+            }] : null
+        };
+    }
+
+    static function handleDoctor(args:Array<String>) {
+        var target = getArg(args, "--target");
+        if (target == null) target = "desktop";
+        
+        var jsonMode = hasArg(args, "--json");
+        var verboseMode = hasArg(args, "--verbose");
+        
+        var checks = new Array<EnvironmentCheck>();
+        var isDone = false;
+        var hasRequiredMissing = false;
+        
+        var provider = getEnvironmentProvider();
+        
+        DevEnvironmentCheckService.instance.check(target, provider, function(check) {
+            checks.push(check);
+            if (check.status == EnvironmentCheckStatus.Missing || check.status == EnvironmentCheckStatus.Error) {
+                hasRequiredMissing = true;
+            }
+        }, function() {
+            isDone = true;
+        });
+        
+        while (!isDone) {
+            #if sys
+            @:privateAccess haxe.MainLoop.tick();
+            #end
+            Sys.sleep(0.01);
+        }
+        
+        if (jsonMode) {
+            var jsonChecks = [for (c in checks) checkToJson(c)];
+            Sys.println(haxe.Json.stringify(jsonChecks, null, "  "));
+        } else {
+            Sys.println("HaxeStack Environment Doctor for Target: " + target);
+            Sys.println("=================================================");
+            var lastCategory = "";
+            for (c in checks) {
+                if (c.category != lastCategory) {
+                    Sys.println("\nCategory: " + c.category);
+                    lastCategory = c.category;
+                }
+                var statusStr = switch (c.status) {
+                    case Ready: "Ready";
+                    case Warning: "Warning";
+                    case Missing: "Missing";
+                    case Error: "Error";
+                    case Unknown: "Unknown";
+                    case Optional: "Optional";
+                };
+                var statusBracket = "[" + StringTools.rpad(statusStr, " ", 7) + "]";
+                var versionInfo = c.detectedVersion != null ? " (v" + c.detectedVersion + ")" : "";
+                var pathInfo = c.detectedPath != null ? " - " + c.detectedPath : "";
+                Sys.println("  " + statusBracket + " " + c.name + versionInfo + pathInfo);
+                
+                if (c.status == EnvironmentCheckStatus.Missing || c.status == EnvironmentCheckStatus.Error || c.status == EnvironmentCheckStatus.Warning || verboseMode) {
+                    if (c.message != null && c.message != "") {
+                        Sys.println("            Message: " + c.message);
+                    }
+                    if (c.details != null && c.details != "") {
+                        Sys.println("            Details: " + c.details);
+                    }
+                    if (c.fixActions != null) {
+                        for (action in c.fixActions) {
+                            Sys.println("            Fix: " + action.label);
+                            if (action.description != null) Sys.println("              " + action.description);
+                            if (action.opensUrl != null) Sys.println("              Link: " + action.opensUrl);
+                            if (action.command != null && action.command != "") Sys.println("              Command: " + action.command);
+                        }
+                    }
+                }
+            }
+            Sys.println("");
+            if (hasRequiredMissing) {
+                Sys.println("[-] Doctor found missing or broken required dependencies.");
+            } else {
+                Sys.println("[+] Environment is healthy!");
+            }
+        }
+        
+        if (hasRequiredMissing) {
+            Sys.exit(3);
+        }
+    }
+
+    static function handleHmmInstall(args:Array<String>) {
+        var dir = getArg(args, "--dir");
+        if (dir == null) dir = ".";
+        
+        var dryRun = hasArg(args, "--dry-run");
+        var continueOnError = hasArg(args, "--continue-on-error");
+        
+        var isDone = false;
+        var resultRes:BootstrapStepResult = null;
+        
+        Sys.println("Scanning '" + dir + "' recursively for hmm.json files...");
+        HmmInstallService.instance.runInstall(dir, {
+            dryRun: dryRun,
+            continueOnError: continueOnError,
+            onLog: function(msg) {
+                Sys.println(msg);
+            }
+        }, function(res) {
+            resultRes = res;
+            isDone = true;
+        });
+        
+        while (!isDone) {
+            #if sys
+            @:privateAccess haxe.MainLoop.tick();
+            #end
+            Sys.sleep(0.01);
+        }
+        
+        if (resultRes != null && !resultRes.success) {
+            Sys.println("Error: " + resultRes.message);
+            Sys.exit(resultRes.exitCode != null ? resultRes.exitCode : 1);
+        } else {
+            Sys.println("HMM installation complete.");
+        }
+    }
+
+    static function handleEnvSetProject(args:Array<String>) {
+        var projectId = getArg(args, "--project-id");
+        var dir = getArg(args, "--dir");
+        if (dir == null) dir = ".";
+        
+        if (projectId == null) {
+            Sys.print("Enter HaxeStack Project ID: ");
+            projectId = Sys.stdin().readLine().trim();
+            if (projectId == "") {
+                Sys.println("Error: Project ID is required.");
+                Sys.exit(1);
+            }
+        }
+        
+        Sys.println("Setting PROJECT_ID=" + projectId + " in " + dir + "/.env...");
+        var success = EnvFileService.instance.updateEnvFile(dir, "PROJECT_ID", projectId);
+        if (success) {
+            Sys.println("Successfully updated .env file.");
+        } else {
+            Sys.println("Failed to update .env file.");
+            Sys.exit(1);
+        }
+    }
+
+    static function handleInit(args:Array<String>) {
+        var projectId = getArg(args, "--project-id");
+        var dir = getArg(args, "--dir");
+        var template = getArg(args, "--template");
+        
+        var skipClone = hasArg(args, "--skip-clone");
+        var runHmmInstall = hasArg(args, "--run-hmm-install");
+        var skipHmmInstall = hasArg(args, "--skip-hmm-install");
+        var force = hasArg(args, "--force");
+        var dryRun = hasArg(args, "--dry-run");
+        var jsonMode = hasArg(args, "--json");
+        var verbose = hasArg(args, "--verbose");
+        
+        // Logical resolution
+        var actualRunHmm = true;
+        if (skipHmmInstall) actualRunHmm = false;
+        else if (runHmmInstall) actualRunHmm = true;
+        
+        // Interactive prompts if not in JSON mode and missing required parameters
+        if (!jsonMode) {
+            if (projectId == null) {
+                Sys.print("Enter HaxeStack Project ID: ");
+                projectId = Sys.stdin().readLine().trim();
+                if (projectId == "") {
+                    Sys.println("Error: Project ID is required.");
+                    Sys.exit(1);
+                }
+            }
+            if (dir == null) {
+                Sys.print("Enter Target Directory (default: ./my-haxestack-project): ");
+                dir = Sys.stdin().readLine().trim();
+                if (dir == "") dir = "./my-haxestack-project";
+            }
+            if (template == null && !skipClone) {
+                Sys.print("Enter Template Git URL (default: https://github.com/stackplatform/starter-template.git): ");
+                template = Sys.stdin().readLine().trim();
+                if (template == "") template = "https://github.com/stackplatform/starter-template.git";
+            }
+        } else {
+            // In JSON mode, raise errors if arguments are missing
+            if (projectId == null) {
+                Sys.println(haxe.Json.stringify({success: false, message: "Missing required option: --project-id", exitCode: 1}));
+                Sys.exit(1);
+            }
+            if (dir == null) {
+                Sys.println(haxe.Json.stringify({success: false, message: "Missing required option: --dir", exitCode: 1}));
+                Sys.exit(1);
+            }
+            if (template == null && !skipClone) {
+                template = "https://github.com/stackplatform/starter-template.git";
+            }
+        }
+        
+        // If template doesn't look like a URL and is "starter-template", map it
+        if (template == "starter-template") {
+            template = "https://github.com/stackplatform/starter-template.git";
+        }
+        
+        var resultRes:BootstrapStepResult = null;
+        
+        if (skipClone) {
+            if (!jsonMode) Sys.println("Writing environment variables...");
+            var envSuccess = true;
+            if (dryRun) {
+                if (!jsonMode) Sys.println("(Dry Run) Would write PROJECT_ID to .env");
+            } else {
+                envSuccess = EnvFileService.instance.updateEnvFile(dir, "PROJECT_ID", projectId);
+            }
+            
+            if (!envSuccess) {
+                resultRes = {
+                    stepId: "onboard_env",
+                    success: false,
+                    message: "Failed to update .env file",
+                    exitCode: -5
+                };
+            } else {
+                if (actualRunHmm) {
+                    if (!jsonMode) Sys.println("Running hmm install recursively...");
+                    var isDone = false;
+                    HmmInstallService.instance.runInstall(dir, {
+                        dryRun: dryRun,
+                        onLog: function(msg) {
+                            if (!jsonMode) Sys.println(msg);
+                        }
+                    }, function(res) {
+                        resultRes = res;
+                        isDone = true;
+                    });
+                    while (!isDone) {
+                        #if sys
+                        @:privateAccess haxe.MainLoop.tick();
+                        #end
+                        Sys.sleep(0.01);
+                    }
+                } else {
+                    resultRes = {
+                        stepId: "onboard",
+                        success: true,
+                        message: "Onboarding completed (skipped clone and hmm install)",
+                        exitCode: 0
+                    };
+                }
+            }
+        } else {
+            var config = {
+                projectId: projectId,
+                repoUrl: template,
+                targetDir: dir,
+                runHmmInstall: actualRunHmm,
+                force: force,
+                dryRun: dryRun,
+                verbose: verbose,
+                onLog: function(msg) {
+                    if (!jsonMode) Sys.println(msg);
+                }
+            };
+            
+            var isDone = false;
+            ProjectOnboardingService.instance.onboardProject(config, function(res) {
+                resultRes = res;
+                isDone = true;
+            });
+            
+            while (!isDone) {
+                #if sys
+                @:privateAccess haxe.MainLoop.tick();
+                #end
+                Sys.sleep(0.01);
+            }
+        }
+        
+        if (jsonMode) {
+            var status = {
+                success: resultRes != null ? resultRes.success : true,
+                message: resultRes != null ? resultRes.message : "Onboarding finished",
+                exitCode: resultRes != null ? (resultRes.exitCode != null ? resultRes.exitCode : 0) : 0
+            };
+            Sys.println(haxe.Json.stringify(status, null, "  "));
+        } else {
+            if (resultRes != null && !resultRes.success) {
+                Sys.println("Error: " + resultRes.message);
+                Sys.exit(resultRes.exitCode != null ? resultRes.exitCode : 1);
+            } else {
+                Sys.println("\nNext steps:");
+                Sys.println("  1. Change directory: cd " + dir);
+                if (!actualRunHmm) {
+                    Sys.println("  2. Install dependencies: haxelib run hmm install");
+                }
+                Sys.println("  3. Build project: haxelib run lime build hl");
+                Sys.println("  4. Open project in VS Code: code .");
+            }
+        }
+    }
+
     static function printHelp() {
         Sys.println("stackdeploy CLI v0.3.0");
         Sys.println("Usage: haxelib run stackdeploy <command> [options]");
@@ -757,12 +1126,23 @@ class Main {
         Sys.println("                       Options: --name, -n <name>");
         Sys.println("  deploy [version]     Trigger deployment of a release.");
         Sys.println("  refresh-env [env]    Fetch environment variables and save to .env.shared (default: development).");
+        Sys.println("  doctor               Check whether required development software is installed.");
+        Sys.println("                       Options: [--target <name>] (default: desktop), [--json], [--verbose]");
+        Sys.println("  init                 Perform the project onboarding flow.");
+        Sys.println("                       Options: [--project-id <id>], [--dir <path>], [--template <url>],");
+        Sys.println("                                [--run-hmm-install], [--skip-clone], [--skip-hmm-install],");
+        Sys.println("                                [--force], [--dry-run], [--json], [--verbose]");
+        Sys.println("  hmm install          Recursively scan directories and run 'hmm install'.");
+        Sys.println("                       Options: [--dir <path>] (default: .), [--dry-run], [--continue-on-error]");
+        Sys.println("  env set-project      Write/update the PROJECT_ID in the .env file.");
+        Sys.println("                       Options: [--project-id <id>], [--dir <path>] (default: .)");
         Sys.println("  help                 Display this help message.");
         Sys.println("");
         Sys.println("Examples:");
         Sys.println("  haxelib run stackdeploy compile --version 1.0.0");
         Sys.println("  haxelib run stackdeploy push");
-        Sys.println("  haxelib run stackdeploy release create --version 1.0.0");
+        Sys.println("  haxelib run stackdeploy doctor");
+        Sys.println("  haxelib run stackdeploy init --project-id proj123 --dir ./MyApp --run-hmm-install");
     }
 }
 
