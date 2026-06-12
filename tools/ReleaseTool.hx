@@ -158,7 +158,14 @@ class ReleaseTool {
         } else {
             // For HTTP, we can use Socket for exact header control
             var socket = new Socket();
-            socket.connect(new Host(hostPart), 80);
+            var hostOnly = hostPart;
+            var portNum = 80;
+            var colonIdx = hostPart.lastIndexOf(":");
+            if (colonIdx != -1) {
+                hostOnly = hostPart.substring(0, colonIdx);
+                portNum = Std.parseInt(hostPart.substring(colonIdx + 1)) ?? 80;
+            }
+            socket.connect(new Host(hostOnly), portNum);
             
             // Build raw HTTP PUT request with ONLY the signed headers
             var httpRequest = 'PUT $pathPart HTTP/1.1\r\n';
