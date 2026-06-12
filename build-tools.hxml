@@ -4,7 +4,6 @@
 -lib SideWinder
 -lib haxe-injection
 -lib json2object
--lib hx-websocket
 -main tools.Main
 -neko run.n
 -D neko_v2

@@ -630,7 +630,7 @@ class Main {
                 
                 if (build.artifact != null) {
                     // Resolve glob pattern to actual file path
-                    var resolvedArtifact = build.artifact;
+                    var resolvedArtifact:String = build.artifact;
                     if (resolvedArtifact.indexOf("*") != -1) {
                         var dir = haxe.io.Path.directory(resolvedArtifact);
                         var pattern = haxe.io.Path.withoutDirectory(resolvedArtifact);
