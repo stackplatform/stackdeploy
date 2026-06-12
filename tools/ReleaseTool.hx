@@ -235,7 +235,7 @@ class ReleaseTool {
     }
 
     public function finalizeRelease(releaseId:String):Void {
-        var url = '${apiUrl}/v1/releases/${releaseId}/finalize';
+        var url = '${apiUrl}/v1/projects/${projectId}/releases/${releaseId}/finalize';
         post(url, {});
     }
 

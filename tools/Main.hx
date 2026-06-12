@@ -629,12 +629,35 @@ class Main {
                 }
                 
                 if (build.artifact != null) {
-                    Sys.println('Uploading artifact: ${build.artifact}');
+                    // Resolve glob pattern to actual file path
+                    var resolvedArtifact = build.artifact;
+                    if (resolvedArtifact.indexOf("*") != -1) {
+                        var dir = haxe.io.Path.directory(resolvedArtifact);
+                        var pattern = haxe.io.Path.withoutDirectory(resolvedArtifact);
+                        var prefix = pattern.split("*")[0];
+                        var suffix = pattern.split("*")[1];
+                        if (dir == "") dir = ".";
+                        var found:Null<String> = null;
+                        if (sys.FileSystem.exists(dir) && sys.FileSystem.isDirectory(dir)) {
+                            for (f in sys.FileSystem.readDirectory(dir)) {
+                                if (StringTools.startsWith(f, prefix) && StringTools.endsWith(f, suffix)) {
+                                    found = dir + "/" + f;
+                                    break;
+                                }
+                            }
+                        }
+                        if (found == null) {
+                            Sys.println('Error: No file matching ${build.artifact}');
+                            Sys.exit(1);
+                        }
+                        resolvedArtifact = found;
+                    }
+                    Sys.println('Uploading artifact: $resolvedArtifact');
                     try {
                         var buildId = tool.addBuild(releaseId, build.platform, build.arch, build.name);
-                        tool.uploadArtifact(buildId, build.artifact);
+                        tool.uploadArtifact(buildId, resolvedArtifact);
                     } catch (e:Dynamic) {
-                        Sys.println('Error uploading artifact ${build.artifact}: $e');
+                        Sys.println('Error uploading artifact $resolvedArtifact: $e');
                         Sys.exit(1);
                     }
                 }
