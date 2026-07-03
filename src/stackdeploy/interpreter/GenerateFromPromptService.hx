@@ -104,12 +104,14 @@ class GenerateFromPromptService {
         // Enrich install record with prompt metadata
         var recordPath = '${request.projectPath}/.haxestack/modules/${interp.moduleId}.json';
         if (sys.FileSystem.exists(recordPath)) {
-            var raw:Dynamic = Json.parse(sys.io.File.getContent(recordPath));
-            Reflect.setField(raw, "sourcePrompt",            request.prompt);
-            Reflect.setField(raw, "interpretedIntent",       "install_module");
-            Reflect.setField(raw, "interpretationConfidence", interp.confidence);
-            Reflect.setField(raw, "interpretationMode",      interp.interpretationMode);
-            sys.io.File.saveContent(recordPath, Json.stringify(raw, null, "  "));
+            try {
+                var raw:Dynamic = Json.parse(sys.io.File.getContent(recordPath));
+                Reflect.setField(raw, "sourcePrompt",            request.prompt);
+                Reflect.setField(raw, "interpretedIntent",       "install_module");
+                Reflect.setField(raw, "interpretationConfidence", interp.confidence);
+                Reflect.setField(raw, "interpretationMode",      interp.interpretationMode);
+                sys.io.File.saveContent(recordPath, Json.stringify(raw, null, "  "));
+            } catch (_:Dynamic) {}
         }
 
         return { success: true, dryRun: false, plan: plan, installResult: installResult, errors: [], warnings: warnings };
