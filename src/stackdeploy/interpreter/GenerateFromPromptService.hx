@@ -85,7 +85,7 @@ class GenerateFromPromptService {
 
         var warnings:Array<String> = [];
         if (interp.confidence < 0.90)
-            warnings.push('Note: Interpreted with medium confidence (${Math.round(interp.confidence * 100)}%). ${interp.explanation}');
+            warnings.push('Note: ${interp.explanation}');
 
         var plan = buildPlan(request.prompt, interp, manifest, inputs, risk,
             expectedFiles, expectedMetadataFiles, conflicts, warnings);
