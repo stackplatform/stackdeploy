@@ -81,6 +81,7 @@ class ModuleInstaller {
                 warnings.push('Metadata render error in ${metaDef.template}: ${e.message}');
 
             var outPath = '$projectPath/.haxestack/generated/${metaDef.category}/$moduleId.json';
+            // Metadata is always regenerated — it is derived output, not user-editable
             GeneratedFileWriter.write(outPath, contentResult.html, true);
             metadataFiles.push('.haxestack/generated/${metaDef.category}/$moduleId.json');
         }

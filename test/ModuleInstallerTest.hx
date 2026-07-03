@@ -47,6 +47,10 @@ class ModuleInstallerTest extends Test {
         Assert.equals(1, result.createdFiles.length);
         Assert.equals("Shared/app/services/IWidgetApi.hx", result.createdFiles[0]);
         Assert.isTrue(sys.FileSystem.exists('$tmpProject/Shared/app/services/IWidgetApi.hx'));
+
+        var fileContent = sys.io.File.getContent('$tmpProject/Shared/app/services/IWidgetApi.hx');
+        Assert.equals(-1, fileContent.indexOf("{{{"));
+
         Assert.equals(1, result.metadataFiles.length);
         Assert.isTrue(sys.FileSystem.exists('$tmpProject/.haxestack/generated/permissions/test-mod.json'));
         Assert.isTrue(sys.FileSystem.exists('$tmpProject/.haxestack/modules/test-mod.json'));
