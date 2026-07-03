@@ -77,7 +77,6 @@ class GenerateModuleCommand {
     }
 
     static function printNextSteps(ctx:Dynamic):Void {
-        var en  = Reflect.field(ctx, "entityName");
         var rs  = Reflect.field(ctx, "routeSegment");
         var tn  = Reflect.field(ctx, "tableName");
         var ri  = Reflect.field(ctx, "repositoryInterfaceName");

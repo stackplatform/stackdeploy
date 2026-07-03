@@ -1,6 +1,7 @@
 -cp src
 -cp test
--cp /Users/clay/src/HaxeStackPlatform/Shared
+# Assumes stackdeploy and HaxeStackPlatform are sibling directories
+-cp ../HaxeStackPlatform/Shared
 -lib utest
 -main TestMain
 -hl test.hl
