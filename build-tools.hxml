@@ -1,5 +1,10 @@
--cp tools
+-cp .
+-cp ../../../Source
+-cp ../../../../Shared
+-lib SideWinder
+-lib haxe-injection
+-lib json2object
 -main tools.Main
 -neko run.n
 -D neko_v2
--D windows
+-D cli
