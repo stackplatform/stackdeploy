@@ -1,4 +1,7 @@
-package stackdeploy.generator;
+package stackdeploy.commands;
+
+import stackdeploy.generator.ModuleInstaller;
+import stackdeploy.generator.ModuleInstallResult;
 
 class GenerateModuleCommand {
     static inline var DEFAULT_TEMPLATES = "./Templates/modules";
@@ -18,7 +21,6 @@ class GenerateModuleCommand {
         }
         if (templatesPath == null) templatesPath = DEFAULT_TEMPLATES;
 
-        // Collect remaining --key value pairs as inputs
         var inputs = new Map<String, String>();
         var i = 1;
         while (i < args.length) {
@@ -44,7 +46,6 @@ class GenerateModuleCommand {
         Sys.println('Generated module: ${r.moduleId}');
         Sys.println('Feature: ${Reflect.field(ctx, "entityName")}');
         Sys.println("");
-
         if (r.createdFiles.length > 0) {
             Sys.println("Files created:");
             for (f in r.createdFiles) Sys.println('  $f');
@@ -70,7 +71,6 @@ class GenerateModuleCommand {
             for (w in r.warnings) Sys.println('  WARNING: $w');
             Sys.println("");
         }
-
         Sys.println('Install record: .haxestack/modules/${moduleId}.json');
         Sys.println("");
         printNextSteps(ctx);
@@ -84,7 +84,6 @@ class GenerateModuleCommand {
         var ai  = Reflect.field(ctx, "apiInterfaceName");
         var av  = Reflect.field(ctx, "apiImplementationName");
         var enl = Reflect.field(ctx, "entityNameLower");
-
         Sys.println("Next manual steps:");
         Sys.println('  1. Add migration: Server/migrations/sqlite/YYYYMMDDNN-${rs}.sql');
         Sys.println('       CREATE TABLE ${tn} (');
